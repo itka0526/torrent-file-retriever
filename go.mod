@@ -2,7 +2,10 @@ module github.com/itka0526/gtorrent
 
 go 1.21.0
 
-require github.com/anacrolix/torrent v1.52.5
+require (
+	github.com/anacrolix/torrent v1.52.5
+	github.com/gin-gonic/gin v1.9.1
+)
 
 require (
 	crawshaw.io/sqlite v0.3.3-0.20220618202545-d1964889ea3c // indirect
@@ -36,7 +39,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
-	github.com/gin-gonic/gin v1.9.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -77,7 +79,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/tidwall/btree v1.6.0 // indirect
-	github.com/torenware/vite-go v0.5.6 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect

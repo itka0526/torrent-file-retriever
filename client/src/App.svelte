@@ -13,9 +13,3 @@
     <Search />
     <Items />
 </main>
-
-<style>
-    * {
-        outline: 1px solid rgba(0, 255, 0, 0.3);
-    }
-</style>
