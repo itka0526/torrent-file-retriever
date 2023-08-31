@@ -1,6 +1,9 @@
 package ws
 
-import "github.com/gorilla/websocket"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Hub maintains the set of active clients and broadcasts messages to the
 // clients.
@@ -27,11 +30,43 @@ func NewHub() *Hub {
 	}
 }
 
-func (h *Hub) Run() {
+// slice header is being copied
+// even if the original slice is modified it will reflected in the copy because the underlying array is the same
+// func passByValue() []string {
+// 	v := []string{"apples", "bananas"}
+// 	return v
+// }
+
+// this is for if you want to the caller to modify the original slice's content.
+// func passByReference() *[]string {
+// 	v := []string{"apples", "bananas"}
+// 	return &v
+// }
+
+func spewFileInfos(files []MyFileInfo) []byte {
+	b, err := json.Marshal(files)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func (h *Hub) Run(files []MyFileInfo) {
 	for {
-		for c := range h.clients {
-			c.conn.WriteMessage(websocket.TextMessage, []byte("Hello"))
-		}
+		// Feed the latest information about downloads
+		go func() {
+			for {
+				h.broadcast <- spewFileInfos(files)
+				time.Sleep(500 * time.Millisecond)
+			}
+		}()
+		// for client := range h.clients {
+		// 	for {
+		// 		client.send <- spewFileInfos(files)
+		// 		time.Sleep(500 * time.Millisecond)
+		// 	}
+		// }
+
 		select {
 		case client := <-h.register:
 			h.clients[client] = true

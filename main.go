@@ -3,9 +3,8 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/anacrolix/torrent"
 	"github.com/gin-gonic/gin"
@@ -13,44 +12,24 @@ import (
 	"github.com/itka0526/gtorrent/ws"
 )
 
-type MyFileInfo struct {
-	path  string
-	name  string
-	size  int64
-	isDir bool
-}
-
-var files []MyFileInfo
-
 type Data struct {
 	URL string `json:"URL"`
 }
 
 func main() {
 	router := gin.New()
-
-	if f, err := getFiles("./downloads"); err == nil {
-		files = f
+	hub := ws.NewHub()
+	files, err := ws.NewFileHandler()
+	if err != nil {
+		log.Panic("File handler could not be created. ", err)
 	}
 
-	hub := ws.NewHub()
-	go hub.Run()
+	go hub.Run(files)
 
 	router.GET("/api/ws", func(ctx *gin.Context) { ws.ServeWs(hub, ctx.Writer, ctx.Request) })
 	router.POST("/api/download", download)
 
 	router.Run(":3000")
-}
-
-func getFiles(path string) (files []MyFileInfo, err error) {
-	err = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		files = append(files, MyFileInfo{path: path, name: info.Name(), isDir: info.IsDir(), size: info.Size()})
-		return nil
-	})
-	return
 }
 
 func download(ctx *gin.Context) {
