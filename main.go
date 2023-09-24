@@ -1,72 +1,91 @@
 package main
 
 import (
-	"encoding/json"
-	"io"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
-	"github.com/anacrolix/torrent"
-	"github.com/gin-gonic/gin"
-
-	"github.com/itka0526/gtorrent/ws"
+	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 )
 
-type Data struct {
-	URL string `json:"URL"`
+type Server struct {
+	listAddr string
+}
+
+var ugrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+var pathToCred = "./.secret"
+
+type apiFn func(http.ResponseWriter, *http.Request) error
+
+func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := fn(w, r); err != nil {
+			log.Println(err)
+			fmt.Fprintf(w, "This was not suppose to happen. ")
+		}
+	}
 }
 
 func main() {
-	router := gin.New()
-	hub := ws.NewHub()
-	files, err := ws.NewFileHandler()
-	if err != nil {
-		log.Panic("File handler could not be created. ", err)
-	}
+	router := mux.NewRouter()
 
-	go hub.Run(files)
+	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Println("hello")
+		fmt.Fprintln(w, "Hello")
+	})
 
-	router.GET("/api/ws", func(ctx *gin.Context) { ws.ServeWs(hub, ctx.Writer, ctx.Request) })
-	router.POST("/api/download", download)
+	router.HandleFunc("/api/auth", makeHTTPHandleFn(handleAuth))
+	router.HandleFunc("/api/ws", makeHTTPHandleFn(handNewWsConn))
 
-	router.Run(":3000")
+	err := http.ListenAndServe(":3001", nil)
+
+	fmt.Println(err)
 }
 
-func download(ctx *gin.Context) {
-	data, err := validateJSON(ctx.Request.Body)
+func handleAuth(_ http.ResponseWriter, r *http.Request) error {
+	// This function should set a cookie on the client
+	// This cookie will be used for ensuring authentication for subsequent websocket requests
+	b, err := os.ReadFile(pathToCred)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"message": "Invalid URL"})
-		return
+		return err
 	}
 
-	cfg := torrent.NewDefaultClientConfig()
-	// Download files to /downloads
-	cfg.DataDir = "./downloads"
-	// System pick any available port.
-	cfg.ListenPort = 0
+	creds := strings.Split(string(b), "\n")
+	username := strings.Split(creds[0], ":")[1]
+	password := strings.Split(creds[1], ":")[1]
 
-	client, err := torrent.NewClient(cfg)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-		return
-	}
+	log.Println(r.Header, username, password)
 
-	t, _ := client.AddMagnet(data.URL)
-	// Wait till the channel closes, the channel closes when it retrieves the metadata
-	<-t.GotInfo()
-	// save to disk and after the user downloads keep for 20 minutes and delete
-	t.DownloadAll()
+	return nil
 }
 
-func validateJSON(body io.ReadCloser) (data Data, err error) {
-	b, err := io.ReadAll(body)
+func handNewWsConn(w http.ResponseWriter, r *http.Request) error {
+	conn, err := ugrader.Upgrade(w, r, nil)
 	if err != nil {
-		return data, err
+		return err
 	}
 
-	if err := json.Unmarshal(b, &data); err != nil {
-		return data, err
-	}
+	reader(conn)
+	return nil
+}
 
-	return data, err
+func reader(conn *websocket.Conn) {
+	for {
+		msgType, p, err := conn.ReadMessage()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		log.Println("Message: ", string(p))
+
+		conn.WriteMessage(msgType, []byte("Hello from Server! "))
+	}
 }
