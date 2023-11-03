@@ -2,6 +2,8 @@ module github.com/itka0526/gtorrent
 
 go 1.21.1
 
+require github.com/gorilla/sessions v1.2.1
+
 require (
 	crawshaw.io/sqlite v0.3.3-0.20220618202545-d1964889ea3c // indirect
 	github.com/RoaringBitmap/roaring v1.2.3 // indirect
@@ -44,6 +46,7 @@ require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
+	github.com/gorilla/securecookie v1.1.1 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
