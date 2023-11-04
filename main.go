@@ -15,7 +15,26 @@ import (
 )
 
 type Server struct {
-	listAddr string
+	connectedUsers Users
+	listAddr       string
+	pathToCred     string
+	store          *sessions.CookieStore
+}
+
+type Users struct {
+	users []User
+}
+type User struct {
+	uuid uuid.UUID
+}
+
+func (u Users) isUserValid(otherUser string) bool {
+	for _, user := range u.users {
+		if user.uuid.String() == otherUser {
+			return true
+		}
+	}
+	return false
 }
 
 var ugrader = websocket.Upgrader{
@@ -24,77 +43,98 @@ var ugrader = websocket.Upgrader{
 	},
 }
 
-var (
-	pathToCred = "./.env"
-	store      *sessions.CookieStore
-)
-
 type apiFn func(http.ResponseWriter, *http.Request) error
+
+type Message struct {
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+}
+
+func (t Message) toJSON() string {
+	b, err := json.Marshal(t)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := fn(w, r); err != nil {
-			log.Println(err)
-			// TODO: Return pretty JSON errors with message and status
-			fmt.Fprintf(w, "This was not suppose to happen")
+			fmt.Fprint(w, Message{Status: false, Message: err.Error()}.toJSON())
 		}
 	}
 }
 
 func main() {
-	env, _ := readEnv()
-	store = sessions.NewCookieStore([]byte(env.SecretKey))
+	s := &Server{connectedUsers: Users{}, listAddr: ":3000", pathToCred: "./.env"}
+	s.Run()
+}
+
+func (s *Server) Run() {
+	env, _ := s.readEnv()
+	s.store = sessions.NewCookieStore([]byte(env.SecretKey))
 	router := mux.NewRouter()
 
-	router.HandleFunc("/", makeHTTPHandleFn(handleIndex))
-	router.HandleFunc("/api/auth", makeHTTPHandleFn(handleAuth))
+	router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth))
 	router.HandleFunc("/api/ws", makeHTTPHandleFn(handNewWsConn))
 
-	err := http.ListenAndServe(":3001", router)
+	err := http.ListenAndServe(s.listAddr, router)
 
 	fmt.Println(err)
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request) error {
-	sess, _ := store.Get(r, "credentials")
-	// TODO: Check if the user is authenticated
-}
-
-func handleAuth(w http.ResponseWriter, r *http.Request) error {
-	if r.Method != http.MethodPost {
-		return fmt.Errorf("invalid HTTP method: %s", r.Method)
-	}
-	// Retrieve credentials from a file
-	env, err := readEnv()
+func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) error {
+	sess, err := s.store.Get(r, "credentials")
 	if err != nil {
 		return err
 	}
 
-	// Check if user is authorized to proceed
-	var sentCreds struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
+	uuid, ok := sess.Values["uuid"]
 
-	if err := json.NewDecoder(r.Body).Decode(&sentCreds); err != nil {
-		return fmt.Errorf("credentials structure is wrong")
-	}
+	isAuth := sess.Values["auth"] == true && ok && s.connectedUsers.isUserValid(fmt.Sprint(uuid))
+	isBadMethod := r.Method != http.MethodPost
 
-	if sentCreds.Username != env.Username || sentCreds.Password != env.Password {
-		return fmt.Errorf("credentials are wrong")
-	}
+	switch {
+	case isAuth:
+		fmt.Fprint(w, Message{Status: true, Message: "You are authorized."}.toJSON())
+	case isBadMethod:
+		return fmt.Errorf("invalid HTTP method: %s", r.Method)
+	default:
+		// Retrieve credentials from a file
+		env, err := s.readEnv()
+		if err != nil {
+			return err
+		}
 
-	if _, err := setCookie(r, w); err != nil {
-		return err
-	}
+		// Check if user is authorized to proceed
+		var sentCreds struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
 
+		if err := json.NewDecoder(r.Body).Decode(&sentCreds); err != nil {
+			return fmt.Errorf("credentials structure is wrong")
+		}
+
+		if sentCreds.Username != env.Username || sentCreds.Password != env.Password {
+			return fmt.Errorf("credentials are wrong")
+		}
+
+		if _, err := s.setCookie(r, w); err != nil {
+			return err
+		}
+
+		fmt.Fprint(w, Message{Status: true, Message: "You are authorized."}.toJSON())
+	}
 	return nil
 }
 
-func setCookie(r *http.Request, w http.ResponseWriter) (uuid.UUID, error) {
+func (s *Server) setCookie(r *http.Request, w http.ResponseWriter) (uuid.UUID, error) {
 	u := uuid.New()
 
-	session, _ := store.Get(r, "credentials")
+	session, _ := s.store.Get(r, "credentials")
+	session.Values["authorized"] = true
 	session.Values["uuid"] = u.String()
 	sessErr := session.Save(r, w)
 
@@ -111,10 +151,10 @@ type Env struct {
 	SecretKey string
 }
 
-func readEnv() (Env, error) {
-	b, err := os.ReadFile(pathToCred)
+func (s *Server) readEnv() (Env, error) {
+	b, err := os.ReadFile(s.pathToCred)
 	if err != nil {
-		return Env{}, fmt.Errorf("cannot access %s file or the the %s file is empty", pathToCred, pathToCred)
+		return Env{}, fmt.Errorf("cannot access %s file or the the %s file is empty", s.pathToCred, s.pathToCred)
 	}
 	creds := strings.Split(string(b), "\n")
 	env := Env{
