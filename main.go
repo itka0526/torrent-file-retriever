@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -11,36 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
-	"github.com/gorilla/websocket"
+	"github.com/itka0526/gtorrent/src"
 )
 
 type Server struct {
-	connectedUsers Users
-	listAddr       string
-	pathToCred     string
-	store          *sessions.CookieStore
-}
-
-type Users struct {
-	users []User
-}
-type User struct {
-	uuid uuid.UUID
-}
-
-func (u Users) isUserValid(otherUser string) bool {
-	for _, user := range u.users {
-		if user.uuid.String() == otherUser {
-			return true
-		}
-	}
-	return false
-}
-
-var ugrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	listAddr   string
+	pathToCred string
+	store      *sessions.CookieStore
 }
 
 type apiFn func(http.ResponseWriter, *http.Request) error
@@ -67,7 +43,7 @@ func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 }
 
 func main() {
-	s := &Server{connectedUsers: Users{}, listAddr: ":3000", pathToCred: "./.env"}
+	s := &Server{listAddr: ":3000", pathToCred: "./.env"}
 	s.Run()
 }
 
@@ -76,8 +52,21 @@ func (s *Server) Run() {
 	s.store = sessions.NewCookieStore([]byte(env.SecretKey))
 	router := mux.NewRouter()
 
+	hub := src.NewHub()
+
 	router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth))
-	router.HandleFunc("/api/ws", makeHTTPHandleFn(handNewWsConn))
+	router.HandleFunc("/api/ws", func(w http.ResponseWriter, r *http.Request) {
+		sess, err := s.store.Get(r, "credentials")
+		if err != nil {
+			fmt.Fprint(w, Message{Status: false, Message: "please re-login again"}.toJSON())
+		}
+		// TODO: make some kind of error handling here
+		if _, ok := sess.Values["uuid"]; ok {
+			src.NewClient(hub, sess.Values["uuid"].(string), w, r)
+		} else {
+			fmt.Fprint(w, Message{Status: false, Message: "failed to create a websocket connection"}.toJSON())
+		}
+	})
 
 	err := http.ListenAndServe(s.listAddr, router)
 
@@ -90,9 +79,9 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	uuid, ok := sess.Values["uuid"]
+	_, ok := sess.Values["uuid"]
 
-	isAuth := sess.Values["auth"] == true && ok && s.connectedUsers.isUserValid(fmt.Sprint(uuid))
+	isAuth := sess.Values["auth"] == true && ok
 	isBadMethod := r.Method != http.MethodPost
 
 	switch {
@@ -134,7 +123,7 @@ func (s *Server) setCookie(r *http.Request, w http.ResponseWriter) (uuid.UUID, e
 	u := uuid.New()
 
 	session, _ := s.store.Get(r, "credentials")
-	session.Values["authorized"] = true
+	session.Values["auth"] = true
 	session.Values["uuid"] = u.String()
 	sessErr := session.Save(r, w)
 
@@ -163,27 +152,4 @@ func (s *Server) readEnv() (Env, error) {
 		SecretKey: strings.Split(creds[2], ":")[1],
 	}
 	return env, nil
-}
-
-func handNewWsConn(w http.ResponseWriter, r *http.Request) error {
-	conn, err := ugrader.Upgrade(w, r, nil)
-	if err != nil {
-		return err
-	}
-
-	reader(conn)
-	return nil
-}
-
-func reader(conn *websocket.Conn) {
-	for {
-		msgType, p, err := conn.ReadMessage()
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		log.Println("Message: ", string(p))
-
-		conn.WriteMessage(msgType, []byte("Hello from Server! "))
-	}
 }

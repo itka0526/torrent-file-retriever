@@ -14,3 +14,15 @@ export interface ItemInfo {
     Source: string;
     Files: FileInfo[];
 }
+
+export const loginReqOpt = ({ username, password }: { username: string; password: string }) =>
+    ({
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            username,
+            password,
+        }),
+    } as RequestInit);
