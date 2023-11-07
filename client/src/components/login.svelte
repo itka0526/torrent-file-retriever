@@ -17,7 +17,7 @@
 </script>
 
 <div class="h-screen w-screen flex items-center justify-center">
-    <div class="flex flex-col px-16 py-8 rounded-sm min-w-[30%]">
+    <div class="flex flex-col px-16 py-8 min-w-[30%]">
         <div class="px-4 py-6 flex justify-center items-center">
             <h1 class="text-3xl">Welcome back!</h1>
         </div>

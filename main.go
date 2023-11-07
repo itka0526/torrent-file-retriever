@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ type Server struct {
 	listAddr   string
 	pathToCred string
 	store      *sessions.CookieStore
+	wsHub      *src.Hub
 }
 
 type apiFn func(http.ResponseWriter, *http.Request) error
@@ -43,7 +45,8 @@ func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 }
 
 func main() {
-	s := &Server{listAddr: ":3000", pathToCred: "./.env"}
+	hub := src.NewHub()
+	s := &Server{listAddr: ":3000", pathToCred: "./.env", wsHub: hub}
 	s.Run()
 }
 
@@ -52,9 +55,8 @@ func (s *Server) Run() {
 	s.store = sessions.NewCookieStore([]byte(env.SecretKey))
 	router := mux.NewRouter()
 
-	hub := src.NewHub()
-
-	router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth))
+	router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth)).Methods("POST")
+	router.HandleFunc("/api/upload", makeHTTPHandleFn(s.handleUpload)).Methods("POST")
 	router.HandleFunc("/api/ws", func(w http.ResponseWriter, r *http.Request) {
 		sess, err := s.store.Get(r, "credentials")
 		if err != nil {
@@ -62,7 +64,7 @@ func (s *Server) Run() {
 		}
 		// TODO: make some kind of error handling here
 		if _, ok := sess.Values["uuid"]; ok {
-			src.NewClient(hub, sess.Values["uuid"].(string), w, r)
+			src.NewClient(s.wsHub, sess.Values["uuid"].(string), w, r)
 		} else {
 			fmt.Fprint(w, Message{Status: false, Message: "failed to create a websocket connection"}.toJSON())
 		}
@@ -73,49 +75,77 @@ func (s *Server) Run() {
 	fmt.Println(err)
 }
 
-func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) error {
+	if !s.isSessionActive(r) {
+		return fmt.Errorf("please login")
+	}
+
+	var fileNames []string
+	json.Unmarshal([]byte(r.FormValue("file_names")), &fileNames)
+
+	for _, fn := range fileNames {
+		f, fh, err := r.FormFile(fn)
+		if err != nil {
+			return fmt.Errorf("cannot read %s", fn)
+		}
+
+		defer f.Close()
+
+		if err := src.SaveFile(&f, fh); err != nil {
+			return err
+		}
+	}
+
+	data := src.GetFiles()
+	wsMsg, _ := json.Marshal(src.WSMessage{ResType: "get_files_res", Data: string(data)})
+	s.wsHub.Broadcast <- wsMsg
+
+	return nil
+}
+
+func (s *Server) isSessionActive(r *http.Request) bool {
 	sess, err := s.store.Get(r, "credentials")
+	if err != nil {
+		log.Println("something went wrong when accessing session")
+		return false
+	}
+	_, ok := sess.Values["uuid"]
+
+	isAuth := sess.Values["auth"] == true && ok
+
+	return isAuth
+}
+
+func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) error {
+	if s.isSessionActive(r) {
+		fmt.Fprint(w, Message{Status: true, Message: "You are authorized."}.toJSON())
+		return nil
+	}
+	// Retrieve credentials from a file
+	env, err := s.readEnv()
 	if err != nil {
 		return err
 	}
 
-	_, ok := sess.Values["uuid"]
-
-	isAuth := sess.Values["auth"] == true && ok
-	isBadMethod := r.Method != http.MethodPost
-
-	switch {
-	case isAuth:
-		fmt.Fprint(w, Message{Status: true, Message: "You are authorized."}.toJSON())
-	case isBadMethod:
-		return fmt.Errorf("invalid HTTP method: %s", r.Method)
-	default:
-		// Retrieve credentials from a file
-		env, err := s.readEnv()
-		if err != nil {
-			return err
-		}
-
-		// Check if user is authorized to proceed
-		var sentCreds struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&sentCreds); err != nil {
-			return fmt.Errorf("credentials structure is wrong")
-		}
-
-		if sentCreds.Username != env.Username || sentCreds.Password != env.Password {
-			return fmt.Errorf("credentials are wrong")
-		}
-
-		if _, err := s.setCookie(r, w); err != nil {
-			return err
-		}
-
-		fmt.Fprint(w, Message{Status: true, Message: "You are authorized."}.toJSON())
+	// Check if user is authorized to proceed
+	var sentCreds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
 	}
+
+	if err := json.NewDecoder(r.Body).Decode(&sentCreds); err != nil {
+		return fmt.Errorf("credentials structure is wrong")
+	}
+
+	if sentCreds.Username != env.Username || sentCreds.Password != env.Password {
+		return fmt.Errorf("credentials are wrong")
+	}
+
+	if _, err := s.setCookie(r, w); err != nil {
+		return err
+	}
+
+	fmt.Fprint(w, Message{Status: true, Message: "You are authorized."}.toJSON())
 	return nil
 }
 

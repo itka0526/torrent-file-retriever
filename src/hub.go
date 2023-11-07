@@ -3,15 +3,17 @@ package src
 type Hub struct {
 	clients map[*Client]bool
 	// add, remove
-	add    chan *Client
-	remove chan *Client
+	add       chan *Client
+	remove    chan *Client
+	Broadcast chan []byte
 }
 
 func NewHub() *Hub {
 	newHub := &Hub{
-		clients: map[*Client]bool{},
-		add:     make(chan *Client),
-		remove:  make(chan *Client),
+		Broadcast: make(chan []byte),
+		clients:   map[*Client]bool{},
+		add:       make(chan *Client),
+		remove:    make(chan *Client),
 	}
 
 	go newHub.run()
@@ -29,6 +31,15 @@ func (h *Hub) run() {
 				delete(h.clients, client)
 				close(client.send)
 				client.conn.Close()
+			}
+		case globalMsg := <-h.Broadcast:
+			for client := range h.clients {
+				select {
+				case client.send <- globalMsg:
+				default:
+					close(client.send)
+					delete(h.clients, client)
+				}
 			}
 		}
 	}

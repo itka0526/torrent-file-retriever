@@ -21,6 +21,11 @@ type Client struct {
 	send chan []byte
 }
 
+type WSMessage struct {
+	ResType string `json:"response_type"`
+	Data    string `json:"data"`
+}
+
 func (c *Client) read() {
 	defer func() {
 		c.hub.remove <- c
@@ -34,17 +39,9 @@ func (c *Client) read() {
 
 		switch string(msg) {
 		case "get_files":
-			// TODO: handle errors
-			list, _ := GetFiles()
-			names := make([]string, len(list))
-
-			for i, item := range list {
-				names[i] = item.Name()
-			}
-			b, _ := json.Marshal(names)
-
-			// could implement broadcasting here
-			c.send <- b
+			data := GetFiles()
+			wsMsg, _ := json.Marshal(WSMessage{ResType: "get_files_res", Data: string(data)})
+			c.send <- wsMsg
 		}
 	}
 }
