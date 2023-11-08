@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -57,6 +58,7 @@ func (s *Server) Run() {
 
 	router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth)).Methods("POST")
 	router.HandleFunc("/api/upload", makeHTTPHandleFn(s.handleUpload)).Methods("POST")
+	router.HandleFunc("/api/delete", makeHTTPHandleFn(s.handleDelete)).Methods("POST")
 	router.HandleFunc("/api/ws", func(w http.ResponseWriter, r *http.Request) {
 		sess, err := s.store.Get(r, "credentials")
 		if err != nil {
@@ -73,6 +75,34 @@ func (s *Server) Run() {
 	err := http.ListenAndServe(s.listAddr, router)
 
 	fmt.Println(err)
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
+	if !s.isSessionActive(r) {
+		return fmt.Errorf("please login")
+	}
+
+	rb, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+
+	var f src.MyFileInfo
+
+	if err := json.Unmarshal(rb, &f); err != nil {
+		return err
+	}
+
+	if err := src.DeleteFile(f.Path); err != nil {
+		return err
+	}
+
+	data := src.GetFiles()
+	wsMsg, _ := json.Marshal(src.WSMessage{ResType: "get_files_res", Data: string(data)})
+	s.wsHub.Broadcast <- wsMsg
+
+	fmt.Fprint(w, Message{Status: true, Message: fmt.Sprintf(`'%s' was removed.`, f.Name)}.toJSON())
+	return nil
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) error {
@@ -100,6 +130,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) error {
 	wsMsg, _ := json.Marshal(src.WSMessage{ResType: "get_files_res", Data: string(data)})
 	s.wsHub.Broadcast <- wsMsg
 
+	fmt.Fprint(w, Message{Status: true, Message: "Files were successfully uploaded."}.toJSON())
 	return nil
 }
 

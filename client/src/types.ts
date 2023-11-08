@@ -4,9 +4,11 @@ export type Message = {
 };
 
 export type MyFileInfo = {
+    path: string;
     name: string;
     size: number;
     modified_date: string;
+    is_directory: boolean;
 };
 
 export type WSMessage = {

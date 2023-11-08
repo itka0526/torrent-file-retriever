@@ -2,17 +2,18 @@ package src
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/fs"
 	"mime/multipart"
 	"os"
+	"path/filepath"
 	"time"
 )
 
 const p = "./downloads/"
 
 type MyFileInfo struct {
+	Path    string    `json:"path"`
 	Name    string    `json:"name"`
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"modified_date"`
@@ -22,30 +23,29 @@ type MyFileInfo struct {
 func GetFiles() []byte {
 	// TODO: handle errors
 	list, _ := GetFilesRaw()
-	myFilesInfos := make([]MyFileInfo, len(list))
-
-	for i, item := range list {
-		fileInfo, _ := item.Info()
-		myFilesInfos[i] = MyFileInfo{
-			Name:    fileInfo.Name(),
-			Size:    fileInfo.Size(),
-			ModTime: fileInfo.ModTime(),
-			IsDir:   fileInfo.IsDir(),
-		}
-	}
-	data, _ := json.Marshal(myFilesInfos)
+	data, _ := json.Marshal(list)
 	return data
 }
 
-func GetFilesRaw() ([]fs.DirEntry, error) {
-	entries, err := os.ReadDir(p)
-
-	fmt.Println(entries)
+func GetFilesRaw() ([]MyFileInfo, error) {
+	files := make([]MyFileInfo, 0)
+	err := filepath.Walk(p, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		files = append(files, MyFileInfo{
+			Path:    path,
+			Name:    info.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		})
+		return nil
+	})
 	if err != nil {
-		return entries, err
+		return nil, err
 	}
-
-	return entries, nil
+	return files, nil
 }
 
 func SaveFile(f *multipart.File, fh *multipart.FileHeader) error {
@@ -60,4 +60,8 @@ func SaveFile(f *multipart.File, fh *multipart.FileHeader) error {
 		return err
 	}
 	return nil
+}
+
+func DeleteFile(p string) error {
+	return os.Remove(p)
 }
