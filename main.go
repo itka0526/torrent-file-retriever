@@ -4,16 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"github.com/itka0526/gtorrent/src"
 )
+
+const Unauthorized = "please login"
 
 type Server struct {
 	listAddr   string
@@ -40,6 +42,7 @@ func (t Message) toJSON() string {
 func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := fn(w, r); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, Message{Status: false, Message: err.Error()}.toJSON())
 		}
 	}
@@ -54,32 +57,70 @@ func main() {
 func (s *Server) Run() {
 	env, _ := s.readEnv()
 	s.store = sessions.NewCookieStore([]byte(env.SecretKey))
-	router := mux.NewRouter()
+	s.store.Options.MaxAge = int(time.Hour) * 24
 
-	router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth)).Methods("POST")
-	router.HandleFunc("/api/upload", makeHTTPHandleFn(s.handleUpload)).Methods("POST")
-	router.HandleFunc("/api/delete", makeHTTPHandleFn(s.handleDelete)).Methods("POST")
-	router.HandleFunc("/api/ws", func(w http.ResponseWriter, r *http.Request) {
-		sess, err := s.store.Get(r, "credentials")
-		if err != nil {
-			fmt.Fprint(w, Message{Status: false, Message: "please re-login again"}.toJSON())
-		}
-		// TODO: make some kind of error handling here
-		if _, ok := sess.Values["uuid"]; ok {
-			src.NewClient(s.wsHub, sess.Values["uuid"].(string), w, r)
-		} else {
-			fmt.Fprint(w, Message{Status: false, Message: "failed to create a websocket connection"}.toJSON())
-		}
+	r := mux.NewRouter()
+
+	r.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("static/assets"))))
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/index.html")
 	})
 
-	err := http.ListenAndServe(s.listAddr, router)
+	r.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth)).Methods("POST")
+	r.HandleFunc("/api/upload", makeHTTPHandleFn(s.handleUpload)).Methods("POST")
+	r.HandleFunc("/api/delete", makeHTTPHandleFn(s.handleDelete)).Methods("POST")
+	r.HandleFunc("/api/download", makeHTTPHandleFn(s.handleDownload)).Methods("POST")
+	r.HandleFunc("/api/magnet", makeHTTPHandleFn(s.handleMagnet)).Methods("POST")
+	r.HandleFunc("/api/ws", s.handleWs)
 
+	err := http.ListenAndServe(s.listAddr, r)
 	fmt.Println(err)
 }
 
-func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleWs(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.store.Get(r, "credentials")
+	if err != nil {
+		fmt.Fprint(w, Message{Status: false, Message: "please re-login again"}.toJSON())
+	}
+	// TODO: make some kind of error handling here
+	if _, ok := sess.Values["uuid"]; ok {
+		src.NewClient(s.wsHub, sess.Values["uuid"].(string), w, r)
+	} else {
+		fmt.Fprint(w, Message{Status: false, Message: "failed to create a websocket connection"}.toJSON())
+	}
+}
+
+func (s *Server) handleMagnet(w http.ResponseWriter, r *http.Request) error {
 	if !s.isSessionActive(r) {
-		return fmt.Errorf("please login")
+		return fmt.Errorf(Unauthorized)
+	}
+	rb, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+
+	var JSONReqBody struct {
+		Url string `json:"url"`
+	}
+
+	if err := json.Unmarshal(rb, &JSONReqBody); err != nil {
+		return err
+	}
+
+	if err := src.DownloadMagnet(JSONReqBody.Url); err != nil {
+		return err
+	}
+
+	data := src.GetFiles()
+	wsMsg, _ := json.Marshal(src.WSMessage{ResType: "get_files_res", Data: string(data)})
+	s.wsHub.Broadcast <- wsMsg
+	fmt.Fprint(w, Message{Status: true, Message: "Torrent file added."}.toJSON())
+	return nil
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) error {
+	if !s.isSessionActive(r) {
+		return fmt.Errorf(Unauthorized)
 	}
 
 	rb, err := io.ReadAll(r.Body)
@@ -87,13 +128,43 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	var f src.MyFileInfo
+	var JSONReqBody src.MyFileInfo
 
-	if err := json.Unmarshal(rb, &f); err != nil {
+	if err := json.Unmarshal(rb, &JSONReqBody); err != nil {
 		return err
 	}
 
-	if err := src.DeleteFile(f.Path); err != nil {
+	file, err := src.GetFile(JSONReqBody)
+	if err != nil {
+		return err
+	}
+
+	if JSONReqBody.IsDir {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", JSONReqBody.Name))
+	}
+
+	w.Write(file)
+	return nil
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
+	if !s.isSessionActive(r) {
+		return fmt.Errorf(Unauthorized)
+	}
+
+	rb, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+
+	var JSONReqBody src.MyFileInfo
+
+	if err := json.Unmarshal(rb, &JSONReqBody); err != nil {
+		return err
+	}
+
+	if err := src.DeleteFile(JSONReqBody); err != nil {
 		return err
 	}
 
@@ -101,13 +172,13 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
 	wsMsg, _ := json.Marshal(src.WSMessage{ResType: "get_files_res", Data: string(data)})
 	s.wsHub.Broadcast <- wsMsg
 
-	fmt.Fprint(w, Message{Status: true, Message: fmt.Sprintf(`'%s' was removed.`, f.Name)}.toJSON())
+	fmt.Fprint(w, Message{Status: true, Message: fmt.Sprintf(`"%s" was removed.`, JSONReqBody.Name)}.toJSON())
 	return nil
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) error {
 	if !s.isSessionActive(r) {
-		return fmt.Errorf("please login")
+		return fmt.Errorf(Unauthorized)
 	}
 
 	var fileNames []string
@@ -137,7 +208,6 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) isSessionActive(r *http.Request) bool {
 	sess, err := s.store.Get(r, "credentials")
 	if err != nil {
-		log.Println("something went wrong when accessing session")
 		return false
 	}
 	_, ok := sess.Values["uuid"]
@@ -158,7 +228,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	// Check if user is authorized to proceed
+	// Check if user is authorized
 	var sentCreds struct {
 		Username string `json:"username"`
 		Password string `json:"password"`

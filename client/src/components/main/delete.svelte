@@ -12,7 +12,7 @@
             return;
         }
 
-        const pending_promise = await fetch("/api/delete", {
+        const pendingResponse = await fetch("/api/delete", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -20,7 +20,7 @@
             body: JSON.stringify(file),
         });
 
-        const response: Message = await pending_promise.json();
+        const response: Message = await pendingResponse.json();
         toast.push(response.message);
         prompt = false;
     };
@@ -28,8 +28,8 @@
 
 <button on:click={handleDelete}>
     {#if prompt && file}
-        <XIcon />
+        <XIcon class="max-md:w-5" />
     {:else}
-        <TrashIcon />
+        <TrashIcon class="max-md:w-5" />
     {/if}
 </button>

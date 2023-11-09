@@ -23,14 +23,14 @@
             formData.append("file_names", JSON.stringify(file_names));
 
             axios.defaults.headers.post["Access-Control-Allow-Origin"] = "*";
-            const pending_promise = await axios.post<Message>("/api/upload", formData, {
+            const pendingResponse = await axios.post<Message>("/api/upload", formData, {
                 headers: {
                     "Content-Type": "multipart/form-data",
                 },
             });
             files = null;
 
-            toast.push(pending_promise.data.message);
+            toast.push(pendingResponse.data.message);
         }
     };
 </script>

@@ -2,7 +2,10 @@
     import { wrapper } from "../utils/persist";
     import { socket } from "../utils/store";
     import List from "./main/list.svelte";
+    import Topbar from "./main/topbar.svelte";
     import Upload from "./main/upload.svelte";
+
+    let open = false;
 
     $socket &&
         wrapper($socket, () => {
@@ -12,12 +15,19 @@
         });
 </script>
 
-<div class="w-full py-12" />
-<div class="h-screen w-screen flex">
-    <div class="basis-1/4">
+<Topbar bind:open />
+<div class="h-screen w-full grid grid-cols-[1fr,3fr] max-md:grid-cols-[100%,100%] max-md:relative">
+    <div
+        class={`w-full max-md:absolute max-md:bg-white max-md:h-full max-md:z-10 max-md:transition-transform
+        ${open ? "max-md:translate-x-0" : "max-md:-translate-x-full"}`}
+    >
         <Upload />
     </div>
-    <div class="basis-3/4">
+    <div
+        class={`w-full max-md:absolute max-md:transition-transform
+        ${open ? "max-md:translate-x-full" : "max-md:-translate-x-0"}
+        `}
+    >
         <List />
     </div>
 </div>

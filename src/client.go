@@ -2,7 +2,6 @@ package src
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -52,7 +51,6 @@ func (c *Client) write() {
 	}()
 	for {
 		message, ok := <-c.send
-		fmt.Println(string(message))
 		if !ok {
 			c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 			return

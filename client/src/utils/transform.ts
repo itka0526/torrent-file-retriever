@@ -3,10 +3,11 @@ import type { MyFileInfo } from "../types";
 export const transform = (mfis: MyFileInfo[]) => {
     const result = {};
 
-    mfis.forEach((item: any) => {
-        const paths: any = item.path.split("/").filter((part: any) => part !== "." && part !== "");
+    for (const item of mfis) {
+        const paths: string[] = item.path.split("/").filter((part: any) => part !== "." && part !== "");
         let curr: any = result;
-        paths.forEach((part: string | number, index: number) => {
+        for (let index = 0; index < paths.length; index++) {
+            const part = paths[index];
             if (!curr[part]) {
                 if (index === paths.length - 1 && item.is_directory) {
                     curr[part] = { dummy: {}, ...item };
@@ -15,8 +16,8 @@ export const transform = (mfis: MyFileInfo[]) => {
                 }
             }
             curr = curr[part].dummy;
-        });
-    });
+        }
+    }
 
     let otoa = (obj: any) => {
         if (typeof obj !== "object") return;
@@ -34,6 +35,5 @@ export const transform = (mfis: MyFileInfo[]) => {
     };
 
     otoa(result);
-
     return Object.values(result)[0] as MyFileInfo & { children: MyFileInfo[] };
 };
