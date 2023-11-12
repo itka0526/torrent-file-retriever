@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -18,10 +19,12 @@ import (
 const Unauthorized = "please login"
 
 type Server struct {
-	listAddr   string
-	pathToCred string
-	store      *sessions.CookieStore
-	wsHub      *src.Hub
+	listAddr        string
+	pathToCred      string
+	store           *sessions.CookieStore
+	wsHub           *src.Hub
+	router          *mux.Router
+	middlewareRules []func(path string) bool
 }
 
 type apiFn func(http.ResponseWriter, *http.Request) error
@@ -42,6 +45,7 @@ func (t Message) toJSON() string {
 func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := fn(w, r); err != nil {
+			log.Printf("Error occured: [ %s ]", err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, Message{Status: false, Message: err.Error()}.toJSON())
 		}
@@ -50,7 +54,20 @@ func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 
 func main() {
 	hub := src.NewHub()
-	s := &Server{listAddr: ":3000", pathToCred: "./.env", wsHub: hub}
+	s := &Server{
+		listAddr: ":3000", pathToCred: "./.env", wsHub: hub, router: mux.NewRouter(),
+		middlewareRules: []func(path string) bool{
+			func(path string) bool {
+				return path == "/"
+			},
+			func(path string) bool {
+				return strings.HasPrefix(path, "/assets/")
+			},
+			func(path string) bool {
+				return path == "/api/auth"
+			},
+		},
+	}
 	s.Run()
 }
 
@@ -59,22 +76,40 @@ func (s *Server) Run() {
 	s.store = sessions.NewCookieStore([]byte(env.SecretKey))
 	s.store.Options.MaxAge = int(time.Hour) * 24
 
-	r := mux.NewRouter()
-
-	r.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("static/assets"))))
-	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	s.router.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("static/assets"))))
+	s.router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/index.html")
 	})
 
-	r.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth)).Methods("POST")
-	r.HandleFunc("/api/upload", makeHTTPHandleFn(s.handleUpload)).Methods("POST")
-	r.HandleFunc("/api/delete", makeHTTPHandleFn(s.handleDelete)).Methods("POST")
-	r.HandleFunc("/api/download", makeHTTPHandleFn(s.handleDownload)).Methods("POST")
-	r.HandleFunc("/api/magnet", makeHTTPHandleFn(s.handleMagnet)).Methods("POST")
-	r.HandleFunc("/api/ws", s.handleWs)
+	s.router.Use(s.isAuth)
 
-	err := http.ListenAndServe(s.listAddr, r)
+	s.router.HandleFunc("/api/auth", makeHTTPHandleFn(s.handleAuth)).Methods("POST")
+	s.router.HandleFunc("/api/upload", makeHTTPHandleFn(s.handleUpload))
+	s.router.HandleFunc("/api/delete", makeHTTPHandleFn(s.handleDelete)).Methods("POST")
+	s.router.HandleFunc("/api/download", makeHTTPHandleFn(s.handleDownload)).Methods("POST")
+	s.router.HandleFunc("/api/magnet", makeHTTPHandleFn(s.handleMagnet)).Methods("POST")
+	s.router.HandleFunc("/api/ws", s.handleWs)
+
+	err := http.ListenAndServe(s.listAddr, s.router)
 	fmt.Println(err)
+}
+
+func (s *Server) isAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, rule := range s.middlewareRules {
+			if rule(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		// TODO: make it more secure
+		if !s.isSessionActive(r) {
+			fmt.Fprint(w, Message{Status: false, Message: Unauthorized}.toJSON())
+			return
+		}
+		log.Printf("User is logged in: [ %s ]", r.RemoteAddr)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleWs(w http.ResponseWriter, r *http.Request) {
@@ -91,9 +126,6 @@ func (s *Server) handleWs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMagnet(w http.ResponseWriter, r *http.Request) error {
-	if !s.isSessionActive(r) {
-		return fmt.Errorf(Unauthorized)
-	}
 	rb, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
@@ -119,10 +151,6 @@ func (s *Server) handleMagnet(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) error {
-	if !s.isSessionActive(r) {
-		return fmt.Errorf(Unauthorized)
-	}
-
 	rb, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
@@ -134,25 +162,32 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	file, err := src.GetFile(JSONReqBody)
+	file, isDir, err := src.GetFile(JSONReqBody)
 	if err != nil {
 		return err
 	}
 
-	if JSONReqBody.IsDir {
-		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", JSONReqBody.Name))
+	zipHeader := func(isDir bool) string {
+		if isDir {
+			return "application/zip"
+		}
+		return "application/octet-stream"
 	}
 
+	zipFile := func(isDir bool) string {
+		if isDir {
+			return ".zip"
+		}
+		return ""
+	}
+
+	w.Header().Set("Content-Type", zipHeader(isDir))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", JSONReqBody.Name+zipFile(isDir)))
 	w.Write(file)
 	return nil
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
-	if !s.isSessionActive(r) {
-		return fmt.Errorf(Unauthorized)
-	}
-
 	rb, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
@@ -177,12 +212,8 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) error {
-	if !s.isSessionActive(r) {
-		return fmt.Errorf(Unauthorized)
-	}
-
 	var fileNames []string
-	json.Unmarshal([]byte(r.FormValue("file_names")), &fileNames)
+	json.Unmarshal([]byte(r.FormValue("fileNames")), &fileNames)
 
 	for _, fn := range fileNames {
 		f, fh, err := r.FormFile(fn)

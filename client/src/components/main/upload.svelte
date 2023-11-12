@@ -2,7 +2,8 @@
     import { UploadCloudIcon } from "svelte-feather-icons";
     import axios from "axios";
     import { toast } from "@zerodevx/svelte-toast";
-    import { type Message } from "../../types";
+    import { uploadingFiles } from "../../utils/store";
+    import type { Message } from "../../types";
 
     const handleUpload = async (
         e: Event & {
@@ -11,32 +12,38 @@
     ) => {
         let files = (e.target as HTMLInputElement)?.files;
 
-        if (files) {
+        if (files && files?.length >= 1) {
             let formData = new FormData();
-            const file_names = [];
+            const fileNames: string[] = [];
 
             for (const f of files) {
-                file_names.push(f.name);
+                fileNames.push(f.name);
                 formData.append(f.name, f);
             }
 
-            formData.append("file_names", JSON.stringify(file_names));
+            formData.append("fileNames", JSON.stringify(fileNames));
 
-            axios.defaults.headers.post["Access-Control-Allow-Origin"] = "*";
             const pendingResponse = await axios.post<Message>("/api/upload", formData, {
                 headers: {
                     "Content-Type": "multipart/form-data",
                 },
+                onUploadProgress: (event) => {
+                    $uploadingFiles[fileNames.toString()] = event;
+                },
             });
-            files = null;
 
+            files = null;
+            uploadingFiles.update((uf) => {
+                delete uf[fileNames.toString()];
+                return uf;
+            });
             toast.push(pendingResponse.data.message);
         }
     };
 </script>
 
 <form class="cursor-pointer">
-    <input type="file" class="hidden" id="input-file" on:change={handleUpload} />
+    <input type="file" class="hidden" id="input-file" on:change={handleUpload} multiple />
     <label for="input-file" class="flex justify-center items-center cursor-pointer">
         <div class="flex justify-center items-center gap-2 px-4 py-2 bg-gray-200 shadow-md">
             <UploadCloudIcon strokeWidth={1} />

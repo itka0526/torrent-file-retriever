@@ -1,0 +1,5 @@
+{
+    "scripts": {
+        "build": "cd client/ && npm run build && cd .. && GOOS=linux GOARCH=amd64 go build -o backend && mkdir project && mv backend project/ && mv static project/ && mkdir project/downloads && zip -vr project.zip project/ -x \"*.DS_Store\" && rm -rf project/"
+    }
+}

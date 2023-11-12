@@ -32,12 +32,12 @@
                 </button>
             {/if}
             <div class="text-ellipsis overflow-hidden whitespace-nowrap w-full">
-                <span>
+                <span title={name}>
                     {name}
                 </span>
             </div>
         </div>
-        <span class="max-md:hidden">
+        <span class="max-md:hidden whitespace-nowrap">
             {new Date(modified_date).toLocaleString()}
         </span>
         <span class="whitespace-nowrap">

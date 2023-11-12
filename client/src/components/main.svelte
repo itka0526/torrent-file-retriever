@@ -2,6 +2,7 @@
     import { wrapper } from "../utils/persist";
     import { socket } from "../utils/store";
     import List from "./main/list.svelte";
+    import ListUploadingDownloading from "./main/listUploadingDownloading.svelte";
     import Topbar from "./main/topbar.svelte";
     import Upload from "./main/upload.svelte";
 
@@ -22,6 +23,7 @@
         ${open ? "max-md:translate-x-0" : "max-md:-translate-x-full"}`}
     >
         <Upload />
+        <ListUploadingDownloading />
     </div>
     <div
         class={`w-full max-md:absolute max-md:transition-transform

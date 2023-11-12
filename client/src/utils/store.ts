@@ -1,5 +1,5 @@
 import { readable, writable } from "svelte/store";
-import type { WSMessage, MyFileInfo, ParsedData } from "../types";
+import type { WSMessage, MyFileInfo, ParsedData, UploadingFiles, DownloadingFiles } from "../types";
 
 export let file_list = writable<MyFileInfo[]>([]);
 
@@ -20,3 +20,6 @@ export let socket = readable<WebSocket | null>(null, (set) => {
         ws.close();
     };
 });
+
+export let uploadingFiles = writable<UploadingFiles>({});
+export let downloadingFiles = writable<DownloadingFiles>({});

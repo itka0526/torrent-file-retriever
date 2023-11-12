@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime/multipart"
@@ -73,24 +74,25 @@ func DeleteFile(mfi MyFileInfo) error {
 	return os.Remove(mfi.Path)
 }
 
-func GetFile(mfi MyFileInfo) ([]byte, error) {
+func GetFile(mfi MyFileInfo) (fileBytes []byte, isDir bool, err error) {
+	fmt.Println(mfi)
 	if mfi.IsDir {
 		var buf bytes.Buffer
 		writer := zip.NewWriter(&buf)
 		if err := zipDir(writer, mfi); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := writer.Close(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return buf.Bytes(), nil
+		return buf.Bytes(), true, nil
 	}
 	fb, err := os.ReadFile(mfi.Path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return fb, nil
+	return fb, false, nil
 }
 
 func zipDir(writer *zip.Writer, mfi MyFileInfo) error {

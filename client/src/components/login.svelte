@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { UsersIcon } from "svelte-feather-icons";
     import { loginReqOpt } from "../lib/types";
     export let authorized: boolean;
     import type { Message } from "../types";

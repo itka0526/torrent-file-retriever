@@ -2,32 +2,48 @@
     import { toast } from "@zerodevx/svelte-toast";
     import { DownloadIcon } from "svelte-feather-icons";
     import type { Message, MyFileInfo } from "../../types";
-    import { HttpStatusCode } from "axios";
+    import axios, { HttpStatusCode } from "axios";
+    import { downloadingFiles } from "../../utils/store";
 
     export let file: MyFileInfo;
 
     const handleDownload = async () => {
-        const pendingResponse = await fetch("/api/download", {
+        const fileName = file.is_directory ? file.name + ".zip" : file.name;
+
+        const pendingResponse = await axios.post("/api/download", file, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify(file),
+            responseType: "blob",
+            onDownloadProgress: (event) => {
+                event.total = file.size;
+                $downloadingFiles[fileName] = event;
+            },
         });
 
         if (pendingResponse.status == HttpStatusCode.BadRequest) {
-            const response: Message = await pendingResponse.json();
-            toast.push(response.message);
+            const reader = new FileReader();
+            reader.onload = function () {
+                const response: Message = JSON.parse(reader.result as string);
+                toast.push(response.message);
+            };
             return;
         }
 
-        const blob = await pendingResponse.blob();
+        const blob = pendingResponse.data;
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.download = file.is_directory ? file.name + ".zip" : file.name;
+        link.download = fileName;
         link.href = url;
         link.click();
         URL.revokeObjectURL(url);
+
+        downloadingFiles.update((df) => {
+            console.log(df);
+            delete df[fileName];
+            return df;
+        });
     };
 </script>
 
