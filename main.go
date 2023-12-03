@@ -313,10 +313,5 @@ func (s *Server) readEnv() (Env, error) {
 		Password:  strings.Split(creds[1], ":")[1],
 		SecretKey: strings.Split(creds[2], ":")[1],
 	}
-	env = Env{
-		Username:  "admin",
-		Password:  "123",
-		SecretKey: "admin123",
-	}
 	return env, nil
 }
