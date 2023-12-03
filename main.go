@@ -55,7 +55,7 @@ func makeHTTPHandleFn(fn apiFn) http.HandlerFunc {
 func main() {
 	hub := src.NewHub()
 	s := &Server{
-		listAddr: ":3000", pathToCred: "./.env", wsHub: hub, router: mux.NewRouter(),
+		listAddr: ":4311", pathToCred: "./.env", wsHub: hub, router: mux.NewRouter(),
 		middlewareRules: []func(path string) bool{
 			func(path string) bool {
 				return path == "/"
@@ -312,6 +312,11 @@ func (s *Server) readEnv() (Env, error) {
 		Username:  strings.Split(creds[0], ":")[1],
 		Password:  strings.Split(creds[1], ":")[1],
 		SecretKey: strings.Split(creds[2], ":")[1],
+	}
+	env = Env{
+		Username:  "admin",
+		Password:  "123",
+		SecretKey: "admin123",
 	}
 	return env, nil
 }
